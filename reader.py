@@ -11,6 +11,11 @@ import wx.lib.agw.ultimatelistctrl as ULC
 import feedparser
 import re
 import jinja2
+from time import mktime
+from datetime import datetime
+
+ID_FULLSCREEN = 1001
+ID_QUIT       = 1999
 
 app = wx.App(False)
 
@@ -33,8 +38,13 @@ class MainFrame(wx.Frame):
         self.menu_bar = wx.MenuBar()
         main = wx.Menu()
 
-        quit = wx.MenuItem(main, 1001, '&Quit\tCtrl+Q')
-        self.Bind(wx.EVT_MENU, self.OnQuit)
+        self.is_fullscreen = False
+        fullscreen = wx.MenuItem(main, ID_FULLSCREEN, 'Full Screen...\tF11')
+        self.Bind(wx.EVT_MENU, self.FullScreen, id=ID_FULLSCREEN)
+        main.AppendItem(fullscreen)
+        
+        quit = wx.MenuItem(main, ID_QUIT, '&Quit\tCtrl+Q')
+        self.Bind(wx.EVT_MENU, self.Quit, id=ID_QUIT)
         main.AppendItem(quit)
         
         self.menu_bar.Append(main, '&Main')
@@ -71,15 +81,26 @@ class MainFrame(wx.Frame):
 
         web_panel = wx.Panel(right_splitter)
         web_sizer = wx.BoxSizer(wx.VERTICAL)
-        web_toolbar = wx.ToolBar(web_panel)
+        self.web_toolbar = web_toolbar = wx.ToolBar(web_panel)
         web_toolbar.AddTool(1, bitmap=wx.ArtProvider.GetBitmap(wx.ART_GO_BACK))
         web_toolbar.AddTool(2, bitmap=wx.ArtProvider.GetBitmap(wx.ART_GO_FORWARD))
+        web_toolbar.AddTool(3, bitmap=wx.ArtProvider.GetBitmap(wx.ART_CROSS_MARK))
+        web_toolbar.AddTool(4, bitmap=wx.ArtProvider.GetBitmap(wx.ART_COPY))
+        web_toolbar.AddTool(5, bitmap=wx.ArtProvider.GetBitmap(wx.ART_PASTE))
+
+        self.ignore_url_change = False
+        self.url_ctrl = wx.TextCtrl(web_toolbar, style=wx.TE_PROCESS_ENTER)
+        web_toolbar.AddControl(self.url_ctrl)
         web_toolbar.Realize()
         web_toolbar.Bind(wx.EVT_TOOL, self.ToolbarHandler)
+        self.url_ctrl.Bind(wx.EVT_TEXT_ENTER, self.ToolbarURLSet)
             
         feed_items_panel = wx.Panel(right_splitter)
         feed_items_sizer = wx.BoxSizer()
         self.feed_items_ctrl = UltimateListCtrl(feed_items_panel, agwStyle=wx.LC_REPORT|wx.LC_SINGLE_SEL)
+        self.unseen_feed_item_font = wx.Font(9, wx.FONTFAMILY_DEFAULT, wx.FONTSTYLE_NORMAL, wx.FONTWEIGHT_BOLD, False)
+        self.seen_feed_item_font = wx.Font(9, wx.FONTFAMILY_DEFAULT, wx.FONTSTYLE_NORMAL, wx.FONTWEIGHT_NORMAL, False)
+        
         feed_items_sizer.Add(self.feed_items_ctrl, 1, flag=wx.EXPAND)
         feed_items_panel.SetSizer(feed_items_sizer)
         self.feed_items_ctrl.InsertColumn(0, "Date")
@@ -97,6 +118,8 @@ class MainFrame(wx.Frame):
         web_sizer.Add(self.web_ctrl, proportion=1, flag=wx.EXPAND)
         web_panel.SetSizer(web_sizer)
         self.web_ctrl.Bind(wx.html2.EVT_WEBVIEW_NAVIGATING, self.Navigating)
+        self.web_ctrl.Bind(wx.html2.EVT_WEBVIEW_NAVIGATED, self.Navigated)
+        self.web_ctrl.Bind(wx.html2.EVT_WEBVIEW_LOADED, self.Loaded)
         self.web_ctrl.Bind(wx.html2.EVT_WEBVIEW_TITLE_CHANGED, self.BrowserTitleChanged)
         
         right_splitter.SplitHorizontally(feed_items_panel,
@@ -111,11 +134,10 @@ class MainFrame(wx.Frame):
 
     def FeedItemSelected(self, evt):
         index = evt.GetIndex()
+        self.feed_items_ctrl.SetItemFont(index, self.seen_feed_item_font)
         item = self.feed_items_ctrl.GetItem(index)
         data = item.GetData()
 
-        print data
-        
         content = data['content'][0]
         template = templates.get(content['type'], None)
 
@@ -133,18 +155,35 @@ class MainFrame(wx.Frame):
         feed = feedparser.parse(feed_url)
         entries = feed.entries
         entries.sort(key=lambda e: e.published_parsed)
-        self.feed_items_ctrl.DeleteAllItems()
+        feed_items = self.feed_items_ctrl
+        feed_items.DeleteAllItems()
         for e, i in zip(entries, range(0, len(entries))):
-            index = self.feed_items_ctrl.InsertStringItem(sys.maxint, '')
+            index = feed_items.InsertStringItem(sys.maxint, datetime.fromtimestamp(mktime(e.published_parsed)).isoformat())
             title = re.sub("\s+", " ", e['title'])
-            self.feed_items_ctrl.SetStringItem(index, 1, title)
-            self.feed_items_ctrl.SetItemData(index, e)
+            feed_items.SetStringItem(index, 1, title)
+            feed_items.SetItemData(index, e)
+            feed_items.SetItemFont(index, self.unseen_feed_item_font)
         
     def BrowserTitleChanged(self, evt):
         evt.GetString()
         
     def Navigating(self, evt):
         evt.Skip()
+        
+    def Navigated(self, evt):
+        self.web_toolbar.EnableTool(1, self.web_ctrl.CanGoBack())
+        self.web_toolbar.EnableTool(2, self.web_ctrl.CanGoForward())
+
+    def Loaded(self, evt):
+        url = evt.GetURL()
+        if type(url) in (str, unicode) and len(url)>=4:
+            try:
+                self.ignore_url_change = True
+                self.url_ctrl.SetValue(url)
+            except e:
+                print e
+            finally:
+                self.ignore_url_change = False
         
     def ToolbarHandler(self, evt):
         if evt.GetId() == 1:
@@ -153,11 +192,39 @@ class MainFrame(wx.Frame):
         elif evt.GetId() == 2:
             # forward
             self.web_ctrl.GoForward()
-        
-    def OnQuit(self, evt):
+        elif evt.GetId() == 3:
+            # stop
+            self.web_ctrl.Stop()
+        elif evt.GetId() == 4:
+            # copy
+            url = wx.URLDataObject()
+            url.SetURL(self.web_ctrl.GetCurrentURL())
+            wx.TheClipboard.Open()
+            wx.TheClipboard.SetData(url)
+            wx.TheClipboard.Close()
+        elif evt.GetId() == 5:
+            # paste
+            url = wx.URLDataObject()
+            wx.TheClipboard.Open()
+            wx.TheClipboard.GetData(url)
+            wx.TheClipboard.Close()
+            self.web_ctrl.LoadURL(url.GetURL())
+
+    def ToolbarURLSet(self, evt):
+        if not self.ignore_url_change:
+            url = self.url_ctrl.GetValue()
+            if not re.match("^([a-z]+):", url):
+                url = "http://" + url
+            self.web_ctrl.LoadURL(url)
+            
+    def Quit(self, evt):
         self.Close(True)
         self.Destroy()
         sys.exit(0)
+
+    def FullScreen(self, evt):
+        self.is_fullscreen = not self.is_fullscreen
+        self.ShowFullScreen(self.is_fullscreen)
         
 frame = MainFrame()
 frame.Show()
