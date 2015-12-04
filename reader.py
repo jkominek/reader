@@ -14,6 +14,8 @@ import jinja2
 from time import mktime
 from datetime import datetime
 
+import database
+
 ID_FULLSCREEN = 1001
 ID_QUIT       = 1999
 
@@ -59,15 +61,12 @@ class MainFrame(wx.Frame):
         feed_list_panel = wx.Panel(top_splitter)
         feed_list_sizer = wx.BoxSizer()
         self.feed_list_ctrl = CustomTreeCtrl(feed_list_panel,
-                                             agwStyle=CTC.TR_HIDE_ROOT)
+                                             agwStyle=CTC.TR_HIDE_ROOT|CTC.TR_HAS_BUTTONS)
         feed_list_sizer.Add(self.feed_list_ctrl, 1, flag=wx.EXPAND)
         feed_list_panel.SetSizer(feed_list_sizer)
         
         self.feed_list_ctrl.SetBackgroundColour('white')
         self.feed_root = self.feed_list_ctrl.AddRoot("Everything")
-        tech = self.feed_list_ctrl.AppendItem(self.feed_root, "Technology")
-        ars = self.feed_list_ctrl.AppendItem(tech, "Ars Technica")
-        ars.url = "http://feeds.arstechnica.com/arstechnica/index"
         self.feed_list_ctrl.Bind(wx.EVT_TREE_SEL_CHANGED, self.FeedSelectionChanged)
 
         self.feed_list_ctrl.ExpandAllChildren(self.feed_root)
@@ -130,7 +129,41 @@ class MainFrame(wx.Frame):
         right_splitter.SetSashPosition(HEIGHT / 4)
         self.SetSizer(top_sizer)
 
+        self.LoadFoldersAndFeeds()
+
         self.web_ctrl.LoadURL("about:blank")
+
+    def LoadFoldersAndFeeds(self):
+        try:
+            database.lock()
+
+            folders = database.query("select id, parent, name from folders order by ordering")
+            mapping = { }
+            noparent = [ ]
+            for folder in folders:
+                if folder[2] == None:
+                    mapping[folder[0]] = self.feed_root
+                else:
+                    noparent.append(folder)
+            while len(noparent) > 0:
+                stillnoparent = [ ]
+                for folder in noparent:
+                    if mapping.has_key(folder[1]):
+                        item = self.feed_list_ctrl.AppendItem(mapping[folder[1]], folder[2])
+                        mapping[folder[0]] = item
+                        item.is_folder = True
+                    else:
+                        stillnoparent.append(folder)
+                noparent = stillnoparent
+
+            feeds = database.query("select id, folder, name, url from feeds order by ordering")
+            for (id, folder, name, url) in feeds:
+                item = self.feed_list_ctrl.AppendItem(mapping[folder], name)
+                item.url = url
+                item.db_id = id
+                item.is_folder = False
+        finally:
+            database.unlock()
 
     def FeedItemSelected(self, evt):
         index = evt.GetIndex()
@@ -147,22 +180,26 @@ class MainFrame(wx.Frame):
             kwargs = data.copy()
             kwargs['value'] = content['value']
             html = template.render(**kwargs)
-            open("dump.html","w").write(html.encode("UTF-8"))
+            #open("dump.html","w").write(html.encode("UTF-8"))
             self.web_ctrl.SetPage(html, '')
         
     def FeedSelectionChanged(self, evt):
-        feed_url = evt.GetItem().url
-        feed = feedparser.parse(feed_url)
-        entries = feed.entries
-        entries.sort(key=lambda e: e.published_parsed)
-        feed_items = self.feed_items_ctrl
-        feed_items.DeleteAllItems()
-        for e, i in zip(entries, range(0, len(entries))):
-            index = feed_items.InsertStringItem(sys.maxint, datetime.fromtimestamp(mktime(e.published_parsed)).isoformat())
-            title = re.sub("\s+", " ", e['title'])
-            feed_items.SetStringItem(index, 1, title)
-            feed_items.SetItemData(index, e)
-            feed_items.SetItemFont(index, self.unseen_feed_item_font)
+        selected_item = evt.GetItem()
+        if selected_item.is_folder:
+            pass
+        else:
+            feed_url = selected_item.url
+            feed = feedparser.parse(feed_url)
+            entries = feed.entries
+            entries.sort(key=lambda e: e.published_parsed)
+            feed_items = self.feed_items_ctrl
+            feed_items.DeleteAllItems()
+            for e, i in zip(entries, range(0, len(entries))):
+                index = feed_items.InsertStringItem(sys.maxint, datetime.fromtimestamp(mktime(e.published_parsed)).isoformat())
+                title = re.sub("\s+", " ", e['title'])
+                feed_items.SetStringItem(index, 1, title)
+                feed_items.SetItemData(index, e)
+                feed_items.SetItemFont(index, self.unseen_feed_item_font)
         
     def BrowserTitleChanged(self, evt):
         evt.GetString()
