@@ -1,0 +1,33 @@
+<html>
+  <head>
+    <style>
+body {
+  padding: 0px;
+  margin: 0px;
+  font-family: gentium;
+}
+div#reader-title {
+  font-size: 75%;
+  background-color: #cccccc;
+  border-bottom: solid 1px black;
+  margin: 0;
+  padding: 0.25em
+}
+div#reader-body {
+  padding: 0.4em;
+  margin: 0;
+}
+div#reader-body :first-child {
+  margin-top: 0;
+  padding-top 0;
+}
+    </style>
+  </head>
+  <body>
+    <div id='reader-title'>
+      <a href="{{ link }}">{{ title }}</a> - {{ author }}
+    </div><div id='reader-body'>
+      {{ value }}
+    </div>
+  </body>
+</html>
