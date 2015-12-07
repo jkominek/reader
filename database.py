@@ -56,6 +56,8 @@ create table feeditems (
 )
 """)
 
+    conn.commit()
+
 def conf_get(key):
     row = None
     try:
@@ -86,5 +88,14 @@ def query(q, args=()):
         cursor.execute(q, args)
         data = list(cursor)
         return data
+    finally:
+        connlock.release()
+
+def insert(q, args=()):
+    try:
+        connlock.acquire()
+        cursor.execute(q, args)
+        conn.commit()
+        return cursor.lastrowid
     finally:
         connlock.release()

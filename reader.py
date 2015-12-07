@@ -16,7 +16,10 @@ from datetime import datetime
 
 import database
 
-ID_FULLSCREEN = 1001
+ID_NEWFOLDER  = 1001
+ID_NEWFEED    = 1002
+
+ID_FULLSCREEN = 1501
 ID_QUIT       = 1999
 
 app = wx.App(False)
@@ -40,6 +43,14 @@ class MainFrame(wx.Frame):
         self.menu_bar = wx.MenuBar()
         main = wx.Menu()
 
+        newfolder = wx.MenuItem(main, ID_NEWFOLDER, 'New Folder')
+        self.Bind(wx.EVT_MENU, self.NewFolder, id=ID_NEWFOLDER)
+        main.AppendItem(newfolder)
+        
+        newfeed = wx.MenuItem(main, ID_NEWFEED, '&New Feed')
+        self.Bind(wx.EVT_MENU, self.NewFeed, id=ID_NEWFEED)
+        main.AppendItem(newfeed)
+        
         self.is_fullscreen = False
         fullscreen = wx.MenuItem(main, ID_FULLSCREEN, 'Full Screen...\tF11')
         self.Bind(wx.EVT_MENU, self.FullScreen, id=ID_FULLSCREEN)
@@ -133,12 +144,56 @@ class MainFrame(wx.Frame):
 
         self.web_ctrl.LoadURL("about:blank")
 
+    def NewFolder(self, evt):
+        dialog = wx.TextEntryDialog(self, "Name of folder...", "New Folder")
+        res = dialog.ShowModal()
+        if res == wx.CANCEL:
+            return
+        name = dialog.GetValue().strip()
+        if len(name)>0:
+            id = database.insert("insert into folders (name, parent, ordering) values (?, ?, (select 1+max(ordering) from folders where parent=?))", (name, 1, 1))
+            self.AddFolderToTree(id, 1, name)
+
+    def NewFeed(self, evt):
+        dialog = wx.TextEntryDialog(self, "Feed URL...", "New Feed")
+        res = dialog.ShowModal()
+        if res == wx.CANCEL:
+            return
+        url = dialog.GetValue().strip()
+
+        selected_item = self.feed_list_ctrl.GetSelection()
+        if selected_item.is_folder:
+            dest_folder = selected_item.db_id
+        else:
+            dest_folder = selected_item.in_folder
+            
+        if len(url)>0:
+            id = database.insert("insert into feeds (name, folder, ordering, url) values (?, ?, (select 1+max(ordering) from feeds where folder=?), ?)", ("feed", dest_folder, dest_folder, url))
+            self.AddFeedToTree(id, dest_folder, "feed", url)
+
+    def AddFeedToTree(self, id, folder, name, url):
+        item = self.feed_list_ctrl.AppendItem(self.folder_mapping[folder], name)
+        item.url = url
+        item.db_id = id
+        item.name = name
+        item.is_folder = False
+        item.in_folder = folder
+
+    def AddFolderToTree(self, id, parent, name):
+        mapping = self.folder_mapping
+        item = self.feed_list_ctrl.AppendItem(mapping[parent], name)
+        mapping[id] = item
+        item.name = name
+        item.is_folder = True
+        item.in_folder = parent
+        item.db_id = id
+
     def LoadFoldersAndFeeds(self):
         try:
             database.lock()
 
             folders = database.query("select id, parent, name from folders order by ordering")
-            mapping = { }
+            self.folder_mapping = mapping = { }
             noparent = [ ]
             for folder in folders:
                 if folder[2] == None:
@@ -149,19 +204,14 @@ class MainFrame(wx.Frame):
                 stillnoparent = [ ]
                 for folder in noparent:
                     if mapping.has_key(folder[1]):
-                        item = self.feed_list_ctrl.AppendItem(mapping[folder[1]], folder[2])
-                        mapping[folder[0]] = item
-                        item.is_folder = True
+                        self.AddFolderToTree(*folder)
                     else:
                         stillnoparent.append(folder)
                 noparent = stillnoparent
 
             feeds = database.query("select id, folder, name, url from feeds order by ordering")
-            for (id, folder, name, url) in feeds:
-                item = self.feed_list_ctrl.AppendItem(mapping[folder], name)
-                item.url = url
-                item.db_id = id
-                item.is_folder = False
+            for feedinfo in feeds:
+                self.AddFeedToTree(*feedinfo)
         finally:
             database.unlock()
 

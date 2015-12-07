@@ -18,8 +18,9 @@ I'm running with Python for this because:
 Ways in which I plan on making this superior to all other feed readers
 I've used:
 
-* The item content pane will be the result of a jinja2 template, so you
-  can customize how the items are rendered by tweaking some HTML/CSS.
+* The item content pane will be the result of a(n optionally per-feed)
+  jinja2 template, so you can customize how the items are rendered by
+  adjusting the HTML/CSS of the template, or invoking arbitrary Python.
 * Feed will not be just be URL with maybe a filter program associated.
   Feeds will be chunks of code that do whatever you want, and return
   feed-like data. (But if your feed is a bare URL, it'll be run
