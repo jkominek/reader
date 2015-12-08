@@ -22,6 +22,9 @@ ID_NEWFEED    = 1002
 ID_FULLSCREEN = 1501
 ID_QUIT       = 1999
 
+ID_FI_PROPERTIES = 2001
+ID_FI_DELETE     = 2500
+
 app = wx.App(False)
 
 WIDTH = 800
@@ -79,6 +82,7 @@ class MainFrame(wx.Frame):
         self.feed_list_ctrl.SetBackgroundColour('white')
         self.feed_root = self.feed_list_ctrl.AddRoot("Everything")
         self.feed_list_ctrl.Bind(wx.EVT_TREE_SEL_CHANGED, self.FeedSelectionChanged)
+        self.feed_list_ctrl.Bind(CTC.EVT_TREE_ITEM_MENU, self.FeedItemMenu)
 
         self.feed_list_ctrl.ExpandAllChildren(self.feed_root)
 
@@ -232,10 +236,32 @@ class MainFrame(wx.Frame):
             html = template.render(**kwargs)
             #open("dump.html","w").write(html.encode("UTF-8"))
             self.web_ctrl.SetPage(html, '')
-        
+
+    def FeedItemMenu(self, evt):
+        item = evt.GetItem()
+        popup = wx.Menu()
+        popup.Append(ID_FI_PROPERTIES, 'Properties')
+        popup.Append(ID_FI_DELETE, 'Delete')
+        self.feed_list_ctrl.Bind(wx.EVT_MENU, self.FeedItemProperties(item), id=ID_FI_PROPERTIES)
+        self.feed_list_ctrl.Bind(wx.EVT_MENU, self.FeedItemDelete(item), id=ID_FI_DELETE)
+        self.feed_list_ctrl.PopupMenu(popup)
+
+    def FeedItemProperties(self, item):
+        def handler(evt):
+            print "properties", item.name
+        return handler
+
+    def FeedItemDelete(self, item):
+        def handler(evt):
+            print "delete", item.name
+        return handler
+
     def FeedSelectionChanged(self, evt):
         selected_item = evt.GetItem()
         if selected_item.is_folder:
+            # TODO
+            # needs some generalization with below, but show the items
+            # from all the folder's feeds
             pass
         else:
             feed_url = selected_item.url
